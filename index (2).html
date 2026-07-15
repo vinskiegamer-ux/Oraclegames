@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OracleGames — Sign in</title>
+<meta name="theme-color" content="#0b0b10">
+<style>
+  :root{--bg:#0b0b10;--border:rgba(255,255,255,.09);--fg:#f4f4f7;--muted:#9a9aa8}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--fg);display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+  .card{max-width:400px;width:100%;text-align:center;background:rgba(20,20,30,.7);border:1px solid var(--border);border-radius:20px;padding:36px 28px;backdrop-filter:blur(12px)}
+  .logo{font-family:'Pixelify Sans',cursive;font-size:28px;font-weight:700;margin-bottom:6px}
+  h1{font-family:'Pixelify Sans',cursive;font-size:20px;margin:16px 0 4px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:22px}
+  .btn{width:100%;padding:13px;border-radius:12px;border:none;background:#1b1b1f;color:#fff;font-size:15px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px}
+  .btn:hover{filter:brightness(1.15)}
+  .btn:disabled{opacity:.6}
+  .status{margin-top:14px;font-size:13px;color:var(--muted);min-height:18px}
+  .status.ok{color:#5ae08a}.status.err{color:#ff5a6a}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:s 1s linear infinite;vertical-align:-2px;margin-right:5px}
+  @keyframes s{to{transform:rotate(360deg)}}
+  .foot{margin-top:16px}.foot a{color:var(--muted);font-size:12px;text-decoration:none}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">🎮 OracleGames</div>
+  <h1>Welcome back</h1>
+  <p class="sub">Sign in to discover Roblox uncopylocked games.</p>
+  <button id="btn" class="btn">▶ Sign in with Roblox</button>
+  <div id="st" class="status"></div>
+  <div class="foot"><a href="https://discord.gg/K9KEYXVy2E" target="_blank">Need help? Join Discord</a></div>
+</div>
+<script>
+const CID="6440127511984479644";
+const RURI=location.origin+location.pathname;
+const AUTH="https://apis.roblox.com/oauth/v1/authorize";
+const TOK="https://apis.roblox.com/oauth/v1/token";
+const UI="https://apis.roblox.com/oauth/v1/userinfo";
+const btn=document.getElementById("btn"),st=document.getElementById("st");
+function b64(b){let s="";b.forEach(x=>s+=String.fromCharCode(x));return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"")}
+function rh(n){const a=new Uint8Array(n);crypto.getRandomValues(a);return Array.from(a,b=>b.toString(16).padStart(2,"0")).join("")}
+function ok(m){st.className="status ok";st.innerHTML=m}
+function er(m){st.className="status err";st.textContent=m;btn.disabled=false}
+function busy(m){st.className="status";st.innerHTML='<span class="spin"></span>'+m}
+
+btn.onclick=async()=>{
+  btn.disabled=true;
+  try{
+    const vb=new Uint8Array(32);crypto.getRandomValues(vb);
+    const v=b64(vb);
+    const d=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(v));
+    const c=b64(new Uint8Array(d));
+    const state=rh(16);
+    sessionStorage.setItem("pv",v);sessionStorage.setItem("os",state);
+    busy("Redirecting to Roblox…");
+    location.href=AUTH+"?response_type=code&client_id="+CID+"&redirect_uri="+encodeURIComponent(RURI)+"&scope=openid%20profile&state="+state+"&code_challenge="+c+"&code_challenge_method=S256";
+  }catch(e){er("Error: "+e.message)}
+};
+
+async function cb(){
+  const p=new URLSearchParams(location.search);
+  const code=p.get("code"),state=p.get("state"),err=p.get("error");
+  if(err){er("Sign-in failed ("+err+")");history.replaceState(null,"",location.pathname);return}
+  if(!code)return;
+  const ss=sessionStorage.getItem("os"),pv=sessionStorage.getItem("pv");
+  if(!ss||ss!==state){er("Security check failed. Try again.");history.replaceState(null,"",location.pathname);return}
+  if(!pv){er("Session expired. Try again.");history.replaceState(null,"",location.pathname);return}
+  sessionStorage.removeItem("os");btn.disabled=true;busy("Finishing sign-in…");
+  try{
+    const f=new URLSearchParams({grant_type:"authorization_code",code,client_id:CID,redirect_uri:RURI,code_verifier:pv});
+    const r=await fetch(TOK,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:f.toString()});
+    const td=await r.json();
+    if(!r.ok||!td.access_token){er("Sign-in failed: "+(td.error_description||td.error||"HTTP "+r.status));history.replaceState(null,"",location.pathname);return}
+    sessionStorage.removeItem("pv");
+    let user={};
+    try{const u=await fetch(UI,{headers:{Authorization:"Bearer "+td.access_token}});if(u.ok)user=await u.json()}catch(_){}
+    localStorage.setItem("roblox_user",JSON.stringify({sub:user.sub,name:user.name,preferred_username:user.preferred_username,profile:user.profile}));
+    ok("✅ Signed in! Loading…");
+    setTimeout(()=>{location.href=location.origin+"/home.html"},500);
+  }catch(e){er("Network error: "+e.message);history.replaceState(null,"",location.pathname)}
+}
+
+// already logged in? → go to games
+try{
+  const u=JSON.parse(localStorage.getItem("roblox_user")||"null");
+  if(u&&(u.name||u.preferred_username)&&!new URLSearchParams(location.search).get("code")){
+    location.href=location.origin+"/home.html";return;
+  }
+}catch(_){}
+cb();
+</script>
+</body>
+</html>
